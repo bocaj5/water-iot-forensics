@@ -1,0 +1,676 @@
+================================================================================
+ SETUP & DEPLOYMENT INSTRUCTIONS
+ Multi-Layer Water Treatment IoT Forensic Monitoring System
+ with Machine Learning-Based Anomaly Detection
+================================================================================
+
+ Last Updated: 21 April 2026
+ Deployment Status: LIVE — both Pis operational on 10.137.71.x network
+
+
+TABLE OF CONTENTS
+─────────────────
+ 1.  System Overview
+ 2.  Hardware Requirements
+ 3.  Network Setup
+ 4.  Raspberry Pi OS Installation
+ 5.  Pi B (Sensor Gateway) Setup
+ 6.  Pi A (Forensic Guardian) Setup
+ 7.  LUKS Encrypted USB Setup
+ 8.  Shared Encryption Keys
+ 9.  Training the ML Models
+ 10. Starting the System
+ 11. Accessing the Dashboard
+ 12. Service Management
+ 13. Running Attack Scenario Tests
+ 14. Forensic Analysis Tools
+ 15. Troubleshooting
+ 16. Security Notes (CoAP / DTLS)
+ 17. Project File Structure
+
+
+================================================================================
+ 1. SYSTEM OVERVIEW
+================================================================================
+
+This system uses two Raspberry Pi devices on the same local network:
+
+  Pi B (Raspberry Pi 2B) — Sensor Gateway   [pib@10.137.71.51]
+    • Reads pH, chlorine, and temperature sensors via GPIO (or simulation mode)
+    • Buffers 12 hours of readings locally
+    • Transmits data to Pi A via CoAP protocol every 5 seconds
+    • Sends periodic heartbeats to Pi A
+
+  Pi A (Raspberry Pi 4B) — Forensic Guardian  [pia@10.137.71.50]
+    • Receives sensor data from Pi B via CoAP server (UDP port 5683)
+    • Runs ML anomaly detection (SVM + LSTM ensemble)
+    • Collects and encrypts forensic evidence (RSA-4096 + AES-256-CBC)
+    • Maintains immutable chain of custody logs
+    • Hosts a web dashboard on port 5000
+    • Stores evidence on LUKS2-encrypted USB (AES-XTS-plain64, 512-bit key)
+
+Data flow:
+
+  [Sensors/Sim] → [Pi B: GPIO/sim → CoAP client] → [Pi A: CoAP server → ML engine]
+                                                               ↓
+                                                        [Anomaly detected?]
+                                                         Yes → [Forensic evidence collection]
+                                                               [Chain of custody logging]
+                                                               [RSA-4096 + AES-256 encryption]
+                                                               [LUKS USB storage]
+                                                               [Dashboard alert]
+
+
+
+================================================================================
+ 2. HARDWARE REQUIREMENTS
+================================================================================
+
+Required:
+  • 1x Raspberry Pi 2 Model B (Sensor Gateway — Pi B)
+  • 1x Raspberry Pi 4 Model B (Forensic Guardian — Pi A)
+  • 2x microSD cards (16 GB minimum, 32 GB recommended)
+  • 2x USB-C / micro-USB power supplies (appropriate for each Pi model)
+  • 1x USB flash drive (for LUKS-encrypted evidence storage on Pi A)
+  • 1x Ethernet switch or router (for local network)
+  • 2x Ethernet cables
+
+Optional (for real sensors — the system runs in simulation mode without these):
+  • pH sensor module (analogue, connected to GPIO pin 4)
+  • Chlorine sensor module (analogue, connected to GPIO pin 17)
+  • Temperature sensor (DS18B20 or similar, connected to GPIO pin 27)
+  • ADC module (e.g. MCP3008) if using analogue sensors
+
+Budget: approximately £100–150 total.
+
+
+================================================================================
+ 3. NETWORK SETUP
+================================================================================
+
+Both Pis must be on the same local network. The deployed configuration is:
+
+  Pi B (Sensor Gateway):      10.137.71.51   username: pib   hostname: water-pib
+  Pi A (Forensic Guardian):   10.137.71.50   username: pia   hostname: water-pia
+
+To configure static IPs for your own deployment, edit /etc/dhcpcd.conf:
+
+    # On Pi B:
+    interface eth0
+    static ip_address=10.137.71.51/24
+    static routers=10.137.71.1
+    static domain_name_servers=10.137.71.1 8.8.8.8
+
+    # On Pi A:
+    interface eth0
+    static ip_address=10.137.71.50/24
+    static routers=10.137.71.1
+    static domain_name_servers=10.137.71.1 8.8.8.8
+
+If using different IPs, update config/node_config.py:
+  - pi_a_config → remote_host   (IP of Pi A, used by Pi B to send CoAP)
+  - pi_b_config → remote_host   (IP of Pi B, used by Pi A as expected source)
+
+
+================================================================================
+ 4. RASPBERRY PI OS INSTALLATION
+================================================================================
+
+
+================================================================================
+ 4. RASPBERRY PI OS INSTALLATION
+================================================================================
+
+1. Download Raspberry Pi Imager from https://www.raspberrypi.com/software/
+
+2. Flash Raspberry Pi OS Lite (64-bit) onto each microSD card.
+   Use the "Lite" version — no desktop environment is needed.
+
+3. In the Imager advanced settings (gear icon), configure:
+   • Hostname: water-pi1 (for Pi 1) or water-pi2 (for Pi 2)
+   • Enable SSH (password or key-based)
+   • Set username: pi
+   • Set a password
+   • Configure Wi-Fi if not using Ethernet
+
+4. Insert the microSD cards and boot each Pi.
+
+5. SSH into each Pi:
+     ssh pia@10.137.71.50   (Pi A — Forensic Guardian)
+     ssh pib@10.137.71.51   (Pi B — Sensor Gateway)
+
+
+================================================================================
+ 5. PI B (SENSOR GATEWAY) SETUP
+================================================================================
+
+1. Copy the entire project codebase to Pi B. From your Mac / desktop:
+
+     scp -i ~/.ssh/id_ed25519 -r /path/to/Codebase pib@10.137.71.51:~/water-monitor
+
+2. SSH into Pi B:
+
+     ssh -i ~/.ssh/id_ed25519 pib@10.137.71.51
+
+3. Run the setup script:
+
+     cd ~/water-monitor
+     sudo bash scripts/setup_pi1.sh
+
+   This script will:
+   • Update the system and set the hostname to water-pib
+   • Install Python 3, pip, venv, I2C tools
+   • Enable GPIO and I2C interfaces
+   • Create a Python virtual environment and install dependencies
+   • Generate RSA-4096 encryption keys (if not already present)
+   • Install and enable the systemd service water-sensor-gateway
+
+4. Reboot to apply hostname changes:
+
+     sudo reboot
+
+
+================================================================================
+ 6. PI A (FORENSIC GUARDIAN) SETUP
+================================================================================
+
+1. Copy the entire project codebase to Pi A. From your Mac / desktop:
+
+     scp -i ~/.ssh/id_ed25519 -r /path/to/Codebase pia@10.137.71.50:~/water-monitor
+
+2. SSH into Pi A:
+
+     ssh -i ~/.ssh/id_ed25519 pia@10.137.71.50
+
+3. Run the setup script:
+
+     cd ~/water-monitor
+     sudo bash scripts/setup_pi2.sh
+
+   This script will:
+   • Update the system and set the hostname to water-pia
+   • Install Python 3, pip, venv, cryptsetup, libatlas, libhdf5
+   • Prepare the LUKS USB mount point at /mnt/encrypted_usb
+   • Create a Python virtual environment and install dependencies
+   • Install TensorFlow Lite runtime (ARM build)
+   • Generate RSA-4096 encryption keys (if not already present)
+   • Create the ML models directory at ~/water-monitor/ml/models/
+   • Install and enable the systemd service water-forensic-guardian
+
+4. Reboot to apply hostname changes:
+
+     sudo reboot
+
+
+================================================================================
+ 7. LUKS ENCRYPTED USB SETUP
+================================================================================
+
+Forensic evidence is stored on a LUKS2-encrypted USB drive connected to Pi A.
+
+DEPLOYED CONFIGURATION:
+  Device:       /dev/sda1
+  LUKS UUID:    c6f38241-6a55-4769-a91a-ec70af73b874
+  Mapper name:  encrypted_usb
+  Mount point:  /mnt/encrypted_usb
+  Evidence dir: /mnt/encrypted_usb/evidence/
+  Keyfile:      ~/water-monitor/crypto_keys/usb_keyfile
+  Passphrase:   p1SensT3st!
+  Auto-unlock:  Yes (via /etc/crypttab + /etc/fstab, unlocked at boot)
+
+To set up from scratch on a new USB drive:
+
+1. Insert the USB into Pi A and identify the device: lsblk
+
+2. Run the LUKS setup script:
+
+     sudo bash ~/water-monitor/scripts/setup_luks.sh /dev/sda
+
+   This will:
+   • Format with LUKS2 (AES-XTS-plain64, 512-bit key)
+   • Prompt for a passphrase
+   • Create ext4 filesystem, mount at /mnt/encrypted_usb
+   • Create ~/water-monitor/crypto_keys/usb_keyfile for auto-unlock
+   • Add entries to /etc/crypttab and /etc/fstab
+
+3. Verify auto-unlock is in place:
+
+     grep encrypted_usb /etc/crypttab /etc/fstab
+
+4. Manual unlock if needed after a crash:
+
+     sudo cryptsetup luksOpen \
+       --key-file ~/water-monitor/crypto_keys/usb_keyfile \
+       /dev/sda1 encrypted_usb
+     sudo mount /dev/mapper/encrypted_usb /mnt/encrypted_usb
+
+NOTE: If the LUKS USB is unavailable, evidence falls back to a local
+plaintext directory. This should only be used during testing — NOT in
+deployment.
+
+
+================================================================================
+ 8. SHARED ENCRYPTION KEYS
+================================================================================
+
+Both Pis share the same RSA-4096 keypair so Pi A can decrypt evidence
+that was collected on Pi B (if Pi B were to collect it locally).  In practice
+evidence is collected on Pi A, but consistency is maintained.
+
+Keys live at ~/water-monitor/crypto_keys/ on Pi A:
+  forensic_private.pem   — private key (chmod 600, pia only)
+  forensic_public.pem    — public key  (chmod 644)
+  usb_keyfile            — binary LUKS unlock key (chmod 400)
+
+To copy keys to Pi B (if needed):
+
+  scp -i ~/.ssh/id_ed25519 \
+      pia@10.137.71.50:~/water-monitor/crypto_keys/forensic_public.pem \
+      pib@10.137.71.51:~/water-monitor/crypto_keys/forensic_public.pem
+
+Then set permissions on Pi B:
+
+  ssh -i ~/.ssh/id_ed25519 pib@10.137.71.51
+  chmod 644 ~/water-monitor/crypto_keys/forensic_public.pem
+
+
+================================================================================
+ 9. TRAINING THE ML MODELS
+================================================================================
+
+The ML models (SVM + LSTM autoencoder) must be trained before the anomaly
+detection engine will use them. Without trained models, the SVM falls back to
+rule-based scoring and the LSTM returns a fixed score of 0.3.
+
+RECOMMENDED: Train on a desktop Mac/PC (TensorFlow required), then copy
+the .tflite model file to Pi A. Pi 2B is too slow for LSTM training.
+
+On Mac / desktop (Python ≥3.10, TensorFlow ≥2.16):
+
+  cd /path/to/Codebase
+  python3 -m ml.train_models --output-dir ml/models
+
+  # Skip LSTM if TensorFlow is not available:
+  python3 -m ml.train_models --output-dir ml/models --skip-lstm
+
+Copy models to Pi A:
+
+  scp -i ~/.ssh/id_ed25519 \
+      ml/models/svm_model.pkl \
+      ml/models/lstm_autoencoder.tflite \
+      ml/models/lstm_autoencoder.json \
+      pia@10.137.71.50:~/water-monitor/ml/models/
+
+On Pi A (SVM only — no TensorFlow for LSTM):
+
+  cd ~/water-monitor
+  source venv/bin/activate
+  python -m ml.train_models --output-dir ml/models --skip-lstm
+
+This will:
+  • Load training data from tests/test data/ (JSON files)
+  • Extract 13 statistical features per sensor reading
+  • Train an SVM classifier (RBF kernel, C=10, balanced classes)
+  • Save to ml/models/svm_model.pkl (≈8.5 MB)
+  • (If LSTM) train LSTM autoencoder (32-unit, seq_len=50, 20 epochs)
+    and export ml/models/lstm_autoencoder.tflite + lstm_autoencoder.json
+
+Training time on Pi 4B (SVM only): ~2–5 minutes
+Training time on Mac (SVM + LSTM): ~15–30 minutes
+
+NOTE: If TensorFlow is not installed (only tflite-runtime), the LSTM training
+step will be skipped. In that case, train on a desktop machine and copy the
+.tflite model file to Pi 2. To train on desktop:
+
+  pip install tensorflow scikit-learn numpy pandas
+  python -m ml.train_models
+
+
+================================================================================
+ 10. STARTING THE SYSTEM
+================================================================================
+
+Start Pi B first, then Pi A.
+
+OPTION A — Using systemd services (production — auto-start enabled):
+
+  On Pi B:
+    ssh -i ~/.ssh/id_ed25519 pib@10.137.71.51
+    sudo systemctl start water-sensor-gateway
+
+  On Pi A (LUKS USB is auto-unlocked at boot via crypttab):
+    ssh -i ~/.ssh/id_ed25519 pia@10.137.71.50
+    sudo systemctl start water-forensic-guardian
+
+  Both services are enabled at boot — rebooting both Pis is sufficient.
+
+OPTION B — Interactive mode (for testing and debugging):
+
+  On Pi B:
+    ssh -i ~/.ssh/id_ed25519 pib@10.137.71.51
+    cd ~/water-monitor && source venv/bin/activate
+    python main_node1.py --mode interactive --log-level DEBUG
+
+  On Pi A:
+    ssh -i ~/.ssh/id_ed25519 pia@10.137.71.50
+    cd ~/water-monitor && source venv/bin/activate
+    python main_node2.py --mode interactive --log-level DEBUG
+
+  In interactive mode, you can type commands:
+    Pi B commands: status, readings, buffer, exit
+    Pi A commands: status, anomalies, readings, exit
+
+Startup order does not strictly matter — Pi B will retry connecting to Pi A
+if it is not yet available — but starting Pi A first means data is captured
+from the first transmission.
+
+
+================================================================================
+ 11. ACCESSING THE DASHBOARD
+================================================================================
+
+The Flask web dashboard runs on Pi A (Forensic Guardian) on port 5000.
+
+Open a browser on any device on the same local network:
+
+  http://10.137.71.50:5000
+
+Dashboard features:
+  • System status cards (Pi A / Pi B, CoAP connection, uptime)
+  • Live sensor readings (pH, chlorine, temperature) with Chart.js graphs
+  • ML Ensemble Score gauge — real-time SVM+LSTM combined anomaly score
+    (green ≤0.5, amber 0.5–0.75, red >0.75)
+  • Alert banner — flashes for new anomaly events and auto-clears on dismiss
+  • Anomaly detection log with severity levels
+  • Forensic evidence inventory table
+  • Auto-refreshes every 8 seconds via AJAX polling (30 s for evidence table)
+
+Chart.js is served locally from /static/js/chart.min.js for reliability
+on the Pi (no CDN dependency).
+
+NOTE: Dashboard is optimised for low-power display. Chart heights are
+constrained (120px canvas) to reduce CPU load on the Pi 4B.
+
+
+================================================================================
+ 12. SERVICE MANAGEMENT
+================================================================================
+
+
+================================================================================
+ 12. SERVICE MANAGEMENT
+================================================================================
+
+Check service status:
+  sudo systemctl status water-sensor-gateway          (Pi B)
+  sudo systemctl status water-forensic-guardian        (Pi A)
+
+View live logs:
+  tail -f /tmp/water-sensor-gateway.log               (Pi B)
+  tail -f /tmp/water-forensic-guardian.log             (Pi A)
+
+Stop / Start / Restart:
+  sudo systemctl stop    water-sensor-gateway          (Pi B)
+  sudo systemctl start   water-sensor-gateway
+  sudo systemctl restart water-sensor-gateway
+
+  sudo systemctl stop    water-forensic-guardian       (Pi A)
+  sudo systemctl start   water-forensic-guardian
+  sudo systemctl restart water-forensic-guardian
+
+Disable auto-start on boot:
+  sudo systemctl disable water-sensor-gateway
+  sudo systemctl disable water-forensic-guardian
+
+
+================================================================================
+ 13. RUNNING ATTACK SCENARIO TESTS
+================================================================================
+
+The test runner in tests/run_attack_tests.py runs all five attack scenarios
+through the live ML engine and produces a JSON results report with accuracy
+metrics (precision, recall, F1, detection latency).
+
+On Pi A (recommended — has trained models):
+
+  cd ~/water-monitor
+  source venv/bin/activate
+  python -m tests.run_attack_tests \
+    --svm   ml/models/svm_model.pkl \
+    --lstm  ml/models/lstm_autoencoder.tflite \
+    --output tests/results/attack_test_results.json
+
+Or on desktop (after copying models):
+
+  python -m tests.run_attack_tests
+
+The five scenarios tested:
+  1. Acid Injection         — rapid pH drop (7.2 → <5.0)
+  2. Chlorine Overdose      — chlorine spike (1.0 → 5.0 mg/L)
+  3. Temperature Spike      — rapid heating (20°C → >40°C)
+  4. Multi-Parameter Attack — coordinated acid + heat
+  5. Sequential Tampering   — gradual pH → Cl → Temp shift
+
+Expected results with trained SVM (LSTM optional):
+  - Detection accuracy: >95% across all scenarios
+  - Detection latency: <50ms from first attack reading to first anomaly flag
+  - Results saved to: tests/results/attack_test_results.json
+
+
+================================================================================
+ 14. FORENSIC ANALYSIS TOOLS
+================================================================================
+
+The forensic_tools.py CLI provides post-incident investigation capabilities.
+
+  cd ~/water-monitor
+  source venv/bin/activate
+
+VERIFY HASH CHAIN INTEGRITY:
+  python -m forensics.forensic_tools verify \
+    --evidence-dir /mnt/encrypted_usb/evidence
+
+  Checks all evidence items have valid hash chain linkage.
+  Exit code 0 = all PASS, exit code 2 = failures detected.
+
+RECONSTRUCT ATTACK TIMELINE:
+  python -m forensics.forensic_tools timeline \
+    --evidence-dir /mnt/encrypted_usb/evidence
+
+  Displays a chronological list of all forensic events with timing gaps.
+
+DECRYPT EVIDENCE PACKAGE:
+  python -m forensics.forensic_tools decrypt \
+    --evidence-id <UUID-prefix> \
+    --key crypto_keys/forensic_private.pem \
+    --evidence-dir /mnt/encrypted_usb/evidence
+
+  Decrypts an AES-256-CBC evidence file using the RSA private key.
+  Output saved as <evidence_id>.decrypted.json
+
+VIEW CHAIN OF CUSTODY:
+  python -m forensics.forensic_tools custody \
+    --evidence-dir /mnt/encrypted_usb/evidence
+
+  Displays the append-only audit log with all actions and operators.
+
+EXPORT EVIDENCE:
+  python -m forensics.forensic_tools export \
+    --evidence-dir /mnt/encrypted_usb/evidence \
+    --format json \
+    --output /tmp/evidence_export.json
+
+  python -m forensics.forensic_tools export \
+    --evidence-dir /mnt/encrypted_usb/evidence \
+    --format csv
+
+
+================================================================================
+ 15. TROUBLESHOOTING
+================================================================================
+
+Problem: Pi B cannot connect to Pi A
+  • Check both Pis are on the same network: ping 10.137.71.50 from Pi B
+  • Check Pi A's CoAP server is running: sudo systemctl status water-forensic-guardian
+  • Check firewall: sudo ufw allow 5683/udp (if ufw is enabled)
+  • Check the IP addresses in config/node_config.py match your network
+
+Problem: "aiocoap not installed" warnings in logs
+  • Install it: source venv/bin/activate && pip install aiocoap
+  • NOTE: aiocoap[all] fails on Debian 13 (DTLS deps missing) — install plain aiocoap
+
+Problem: ML models not found
+  • Train models: python -m ml.train_models (on Pi A or desktop with TensorFlow)
+  • Copy pre-trained models to ml/models/ if training on desktop
+  • Without models, the system uses SVM fallback scoring (LSTM returns 0.3)
+
+Problem: LUKS USB not mounting on boot
+  • Check crypttab: cat /etc/crypttab | grep encrypted_usb
+  • Check fstab: cat /etc/fstab | grep encrypted_usb
+  • Manual unlock: sudo cryptsetup luksOpen --key-file ~/water-monitor/crypto_keys/usb_keyfile /dev/sda1 encrypted_usb
+  • Manual mount: sudo mount /dev/mapper/encrypted_usb /mnt/encrypted_usb
+
+Problem: Dashboard not loading
+  • Check Pi A service is running: sudo systemctl status water-forensic-guardian
+  • Check port 5000 is open: curl http://localhost:5000 on Pi A
+  • Check firewall: sudo ufw allow 5000/tcp
+
+Problem: TensorFlow / TFLite errors on Pi
+  • On Raspberry Pi, use tflite-runtime instead of full tensorflow:
+    pip install tflite-runtime
+  • If neither works, train the LSTM on a desktop Mac/PC and copy the .tflite file to Pi A
+  • If the LSTM is not available, the LSTM detector falls back to score=0.3 (no crash)
+
+Problem: GPIO permission errors on Pi B
+  • Add user to gpio group: sudo usermod -aG gpio pib
+  • Or run with sudo (not recommended for production)
+  • In simulation mode (no real sensors), GPIO errors are expected and handled
+
+Problem: No sensor data appearing
+  • In simulation mode, sensors generate synthetic data automatically
+  • Check sensor_driver_gpio.py logs for errors
+  • Check GPIO pins match config/node_config.py (ph:4, chlorine:17, temperature:27)
+
+Problem: "This event loop is already running" error in CoAP client
+  • Fixed in coap/coap_client.py (threading.Lock around run_until_complete)
+  • If it reappears, check coap_client.py has self._lock protecting both send methods
+
+
+================================================================================
+ 16. SECURITY NOTES — CoAP TRANSPORT SECURITY (DTLS)
+================================================================================
+
+The PPRS specifies CoAP with DTLS v1.2 for transport-layer encryption.
+
+CURRENT STATUS: CoAP is deployed WITHOUT DTLS (plain UDP).
+
+REASON: The aiocoap[all] package (which provides DTLSSocket via the tinydtls
+binding) fails to build on Debian 13 (trixie) aarch64. The dtls C extension
+requires libssl-dev and tinydtls-dev, neither of which are available in a
+compatible version on Debian 13 at time of deployment (April 2026).
+
+MITIGATION MEASURES IN PLACE:
+  1. Network isolation — both Pis are on an isolated lab LAN (10.137.71.x).
+     No untrusted devices are on this segment.
+  2. Application-layer encryption — all forensic evidence is encrypted with
+     AES-256-CBC (key wrapped with RSA-4096) BEFORE storage.  CoAP payloads
+     contain sensor readings only; evidence data never transits in plaintext.
+  3. Hash chain + digital signatures — each evidence package is SHA-256 hashed
+     and the chain is verified on retrieval, providing integrity even if the
+     transport is intercepted.
+
+IMPACT ON OBJECTIVES:
+  • FR2 (DTLS) is partially met: CoAP endpoints are functional, authentication
+    and transport encryption are pending a compatible dtls library.
+  • All other functional requirements (FR1, FR3–FR8) are fully met.
+  • This limitation is documented for the thesis and is consistent with
+    published academic IoT forensics research that frequently omits DTLS
+    in prototype deployments due to constrained-device library limitations.
+
+FUTURE WORK:
+  • Upgrade to aiocoap >= 0.4.5 when Debian 13 trixie provides a compatible
+    tinydtls package, or use a pre-compiled wheel.
+  • Alternative: wrap the CoAP channel with WireGuard (kernel-level UDP
+    tunnel) between Pi A and Pi B for equivalent confidentiality.
+
+
+================================================================================
+ 17. PROJECT FILE STRUCTURE
+================================================================================
+
+Codebase/
+├── main_node1.py                 Entry point for Pi 1 (Sensor Gateway)
+├── main_node2.py                 Entry point for Pi 2 (Forensic Guardian)
+├── requirements_pi1.txt          Python dependencies for Pi 1
+├── requirements_pi2.txt          Python dependencies for Pi 2
+├── setup.py                      Package setup
+│
+├── config/
+│   ├── node_config.py            Network IPs, GPIO pins, feature flags
+│   └── crypto_manager.py         RSA-4096 + AES-256 hybrid encryption
+│
+├── iot_sensors/
+│   ├── sensor_types.py           SensorReading dataclass, sensor classes
+│   ├── sensor_driver_gpio.py     GPIO reading + 12-hour circular buffer
+│   └── sensor_driver_coap.py     Simulated CoAP receiver (fallback)
+│
+├── node_roles/
+│   ├── sensor_gateway.py         Pi 1 main logic (read → buffer → transmit)
+│   ├── forensic_guardian.py      Pi 2 main logic (receive → analyse → collect)
+│   └── heartbeat_monitor.py      Configurable heartbeat with failure detection
+│
+├── anomaly_detection/
+│   ├── engine.py                 SVM+LSTM ensemble orchestrator
+│   ├── feature_extractor.py      13 statistical features from sliding windows
+│   ├── svm_detector.py           SVM classifier (RBF kernel)
+│   └── lstm_detector.py          LSTM autoencoder (TFLite inference)
+│
+├── forensics/
+│   ├── data_models.py            ForensicEvidence, ChainOfCustodyEntry dataclasses
+│   ├── forensic_collector.py     Evidence collection, hashing, encryption, storage
+│   ├── chain_of_custody.py       Append-only JSONL custody log with verification
+│   └── forensic_tools.py         CLI: verify/decrypt/timeline/custody/export
+│
+├── coap/
+│   ├── coap_server.py            aiocoap server on Pi 2 (/sensor-data, /heartbeat)
+│   └── coap_client.py            aiocoap client on Pi 1 (POST readings)
+│
+├── ml/
+│   ├── train_models.py           CLI script to train SVM + LSTM from test data
+│   └── models/                   Trained model files (svm_model.pkl, *.tflite)
+│
+├── dashboard/
+│   ├── app.py                    Flask app factory + API endpoints
+│   ├── templates/
+│   │   └── index.html            Dashboard HTML (Chart.js, status cards)
+│   └── static/
+│       ├── css/style.css          Dark theme responsive CSS
+│       └── js/dashboard.js        AJAX polling + Chart.js rendering
+│
+├── scripts/
+│   ├── setup_pi1.sh              One-shot bootstrap for Pi 1
+│   ├── setup_pi2.sh              One-shot bootstrap for Pi 2
+│   ├── setup_luks.sh             LUKS USB encryption setup
+│   ├── water-sensor-gateway.service      systemd unit for Pi 1
+│   └── water-forensic-guardian.service   systemd unit for Pi 2
+│
+├── utils/
+│   └── logging_manager.py        Centralised logging configuration
+│
+└── tests/
+    ├── attack_scenarios.py        Five attack scenario class definitions
+    ├── run_attack_tests.py        Attack test runner: accuracy + latency metrics
+    ├── test_unit.py               Pytest unit tests (~50 cases, 80%+ coverage)
+    └── test data/                 Production test datasets (JSON)
+        ├── baseline_30_days.json
+        ├── extended_baseline_90_days.json
+        ├── comprehensive_attack_scenarios.json
+        ├── acid_injection_10_attacks.json
+        ├── multi_parameter_5_attacks.json
+        ├── forensic_evidence_50.json
+        └── ...
+
+
+================================================================================
+ END OF INSTRUCTIONS
+================================================================================

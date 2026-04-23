@@ -1,0 +1,26 @@
+[Unit]
+Description=Water Treatment IoT - Forensic Guardian (Pi 2)
+After=network-online.target avahi-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/opt/water-monitor
+ExecStartPre=/bin/bash -c 'mkdir -p /mnt/encrypted_usb/evidence || true'
+ExecStart=/opt/water-monitor/venv/bin/python main_node2.py --mode daemon --log-level INFO --log-file /var/log/water-forensic-guardian.log
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=water-forensic-guardian
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/water-monitor /var/log /mnt/encrypted_usb
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

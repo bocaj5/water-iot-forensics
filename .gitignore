@@ -1,0 +1,71 @@
+# Security: Cryptographic Keys and Secrets
+config/coap_psk.key
+config/crypto_keys/
+*.pem
+*.key
+*.crt
+*.der
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Logs
+*.log
+logs/
+
+# Runtime artifacts
+*.sqlite
+*.db
+
+# Sensitive test data
+tests/test_data/*
+!tests/test_data/
+
+# Temporary files
+*.tmp
+tmp/

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Water Treatment IoT Forensic Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="/static/js/chart.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Water Treatment IoT Forensic Monitor</h1>
+        <div id="connection-status" class="status-badge status-ok">Connected</div>
+    </header>
+
+    <!-- Alert banner (hidden by default, shown on anomaly) -->
+    <div id="alert-banner" class="alert-banner alert-hidden">
+        <span id="alert-text">⚠ ANOMALY DETECTED</span>
+        <button onclick="document.getElementById('alert-banner').classList.add('alert-hidden')">✕</button>
+    </div>
+
+    <div class="dashboard-grid">
+        <!-- System Status -->
+        <div class="card" id="status-card">
+            <h2>System Status</h2>
+            <div class="stat-row"><span>Node ID</span><span id="node-id">--</span></div>
+            <div class="stat-row"><span>Running</span><span id="running">--</span></div>
+            <div class="stat-row"><span>Server Active</span><span id="server-active">--</span></div>
+            <div class="stat-row"><span>Receiving Data</span><span id="receiving-data">--</span></div>
+            <div class="stat-row"><span>Packets Received</span><span id="packets-received">--</span></div>
+        </div>
+
+        <!-- Anomaly Summary -->
+        <div class="card" id="anomaly-card">
+            <h2>Anomaly Detection</h2>
+            <div class="stat-row"><span>Total Anomalies</span><span id="total-anomalies" class="highlight">0</span></div>
+            <div class="stat-row"><span>Evidence Items</span><span id="evidence-count">0</span></div>
+            <div class="stat-row"><span>Last Anomaly</span><span id="last-anomaly">--</span></div>
+            <div id="anomaly-types"></div>
+        </div>
+
+        <!-- ML Score Gauge -->
+        <div class="card" id="ml-score-card">
+            <h2>ML Ensemble Score</h2>
+            <div class="score-gauge-container">
+                <canvas id="score-gauge" width="160" height="100"></canvas>
+                <div class="score-readout">
+                    <span id="score-value" class="score-number">0.00</span>
+                    <span id="score-label" class="score-status status-ok-text">NORMAL</span>
+                </div>
+            </div>
+            <div class="stat-row"><span>SVM Score</span><span id="svm-score">0.00</span></div>
+            <div class="stat-row"><span>LSTM Score</span><span id="lstm-score">0.00</span></div>
+            <div class="stat-row"><span>Sensor</span><span id="score-sensor">--</span></div>
+            <div class="stat-row"><span>Readings Processed</span><span id="ml-processed">0</span></div>
+        </div>
+
+        <!-- pH Chart -->
+        <div class="card chart-card">
+            <h2>pH Level</h2>
+            <canvas id="ph-chart"></canvas>
+        </div>
+
+        <!-- Chlorine Chart -->
+        <div class="card chart-card">
+            <h2>Chlorine (mg/L)</h2>
+            <canvas id="chlorine-chart"></canvas>
+        </div>
+
+        <!-- Temperature Chart -->
+        <div class="card chart-card">
+            <h2>Temperature (°C)</h2>
+            <canvas id="temperature-chart"></canvas>
+        </div>
+
+        <!-- Recent Readings Table -->
+        <div class="card wide-card">
+            <h2>Recent Readings</h2>
+            <div id="readings-table-wrap">
+            <table id="readings-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Sensor</th>
+                        <th>Value</th>
+                        <th>Unit</th>
+                        <th>Confidence</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            </div>
+        </div>
+
+        <!-- Evidence Log -->
+        <div class="card wide-card">
+            <h2>Forensic Evidence Log</h2>
+            <table id="evidence-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Evidence ID</th>
+                        <th>Anomaly Type</th>
+                        <th>Encrypted</th>
+                        <th>Hash Chain</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

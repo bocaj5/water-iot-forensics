@@ -1,0 +1,161 @@
+/* Water Treatment IoT Forensic Monitor - Dashboard Styles */
+
+:root {
+    --bg: #0f1923;
+    --card-bg: #1a2733;
+    --text: #e0e6ed;
+    --text-muted: #7a8d9e;
+    --accent: #00bcd4;
+    --danger: #e74c3c;
+    --warning: #f39c12;
+    --success: #27ae60;
+    --border: #2c3e50;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 2rem;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--border);
+}
+
+header h1 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.status-badge {
+    padding: 0.3rem 0.8rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+.status-ok { background: var(--success); color: #fff; }
+.status-error { background: var(--danger); color: #fff; }
+
+/* ── Alert Banner ── */
+.alert-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--danger);
+    color: #fff;
+    padding: 0.6rem 2rem;
+    font-weight: 700;
+    font-size: 0.95rem;
+    animation: flash 1s ease-in-out infinite alternate;
+}
+.alert-banner button {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 0 0.4rem;
+}
+.alert-hidden { display: none !important; }
+@keyframes flash {
+    from { background: var(--danger); }
+    to   { background: #c0392b; }
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    padding: 1.5rem 2rem;
+}
+
+.card {
+    background: var(--card-bg);
+    border-radius: 8px;
+    padding: 1.2rem;
+    border: 1px solid var(--border);
+}
+.card h2 {
+    font-size: 0.95rem;
+    color: var(--accent);
+    margin-bottom: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.chart-card { height: 240px; }
+.chart-card canvas { height: 195px !important; max-height: 195px; }
+.wide-card { grid-column: span 3; }
+#readings-table-wrap { max-height: 260px; overflow-y: auto; }
+
+/* ── ML Score Gauge Card ── */
+.score-gauge-container {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.6rem;
+}
+.score-readout {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.score-number {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+}
+.score-status {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+.status-ok-text    { color: var(--success); }
+.status-warn-text  { color: var(--warning); }
+.status-crit-text  { color: var(--danger); }
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    font-size: 0.85rem;
+}
+.stat-row span:first-child { color: var(--text-muted); }
+.highlight { color: var(--warning); font-weight: 700; }
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+th, td {
+    padding: 0.5rem 0.6rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+}
+th {
+    color: var(--accent);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+}
+tbody tr:hover { background: rgba(0,188,212,0.05); }
+
+@media (max-width: 900px) {
+    .dashboard-grid { grid-template-columns: 1fr; }
+    .wide-card { grid-column: span 1; }
+    .chart-card { height: 200px; }
+    .chart-card canvas { height: 160px !important; max-height: 160px; }
+}

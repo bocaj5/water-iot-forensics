@@ -1,0 +1,25 @@
+[Unit]
+Description=Water Treatment IoT - Sensor Gateway (Pi 1)
+After=network-online.target avahi-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/opt/water-monitor
+ExecStart=/opt/water-monitor/venv/bin/python main_node1.py --mode daemon --log-level INFO --log-file /var/log/water-sensor-gateway.log
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=water-sensor-gateway
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/water-monitor /var/log
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
