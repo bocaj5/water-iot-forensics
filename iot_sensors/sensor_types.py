@@ -48,12 +48,14 @@ _ADS1115_VFS         = 4.096  # Volts full-scale for PGA=001
 # pH 7.0 buffer solution and set _PH_MIDPOINT_V to the voltage you read.
 # Then dip in pH 4.0 buffer and set _PH_SLOPE_V_PER_PH = (Vmid - V4) / 3.0
 #
-# Empirical midpoint measured 21 Apr 2026 in tap water (~pH 7):
-# AIN0 = 1.3245 V → set as Vmid so tap water reads ≈ pH 7.
+# Empirical midpoint re-measured 06 May 2026 in filtered water (~pH 7):
+# AIN0 stable at 1.0426 V → set as Vmid so filtered water reads ≈ pH 7.
+# (Previous value 1.3245 V was drifting; probe had been air-stored.)
 # Slope: standard Nernst 59.2mV/pH at 25°C ≈ 0.059 V/pH (unscaled electrode).
-# Adjust after proper buffer calibration.
-_PH_MIDPOINT_V       = 1.3245  # V — measured at pH 7 (update after calibration)
-_PH_SLOPE_V_PER_PH   = 0.059   # V/pH — Nernst slope at 25°C, inverted board
+# Single-point cal only — for accuracy, recalibrate with pH 4 + pH 7 buffers.
+# Board polarity: output voltage rises with pH (board has an inverting front-end).
+_PH_MIDPOINT_V       = 1.0426  # V — measured at pH 7 (update after calibration)
+_PH_SLOPE_V_PER_PH   = 0.059   # V/pH — dV/dpH, positive (V rises as pH rises)
 
 
 @dataclass
@@ -166,7 +168,7 @@ class PHSensor:
         return (raw / 32767.0) * _ADS1115_VFS
 
     def _voltage_to_ph(self, voltage: float) -> float:
-        return 7.0 + (_PH_MIDPOINT_V - voltage) / _PH_SLOPE_V_PER_PH
+        return 7.0 + (voltage - _PH_MIDPOINT_V) / _PH_SLOPE_V_PER_PH
 
     def read(self) -> SensorReading:
         if self._hw_available:

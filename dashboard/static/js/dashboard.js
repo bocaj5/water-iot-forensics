@@ -45,7 +45,7 @@ function drawGauge(canvasId, score) {
 
 // ── Chart Setup ──────────────────────────────────────────────────────────────
 
-function makeChart(canvasId, label, color) {
+function makeChart(canvasId, label, color, yRange) {
     const ctx = document.getElementById(canvasId).getContext('2d');
     return new Chart(ctx, {
         type: 'line',
@@ -57,7 +57,8 @@ function makeChart(canvasId, label, color) {
                 borderColor: color,
                 backgroundColor: color + '22',
                 fill: true,
-                tension: 0.3,
+                tension: 0.5,
+                cubicInterpolationMode: 'monotone',
                 pointRadius: 0,
                 borderWidth: 1.5,
             }]
@@ -79,7 +80,8 @@ function makeChart(canvasId, label, color) {
                     grid: { color: 'rgba(255,255,255,0.05)' },
                 },
                 y: {
-                    grace: '8%',          // auto-scale with 8% padding — no hard limits
+                    suggestedMin: yRange[0],
+                    suggestedMax: yRange[1],
                     ticks: { color: '#7a8d9e', font: { size: 10 } },
                     grid: { color: 'rgba(255,255,255,0.05)' },
                 },
@@ -89,10 +91,12 @@ function makeChart(canvasId, label, color) {
     });
 }
 
-// No fixed yMin/yMax — Chart.js auto-scales to actual data range
-const phChart      = makeChart('ph-chart',          'pH',          '#00bcd4');
-const chlorineChart = makeChart('chlorine-chart',   'Chlorine',    '#f39c12');
-const tempChart    = makeChart('temperature-chart', 'Temperature', '#e74c3c');
+// Per-sensor Y-ranges chosen so normal readings don't fill the whole chart
+// (which makes noise look extreme), but anomalies outside the range still
+// render because suggestedMin/Max are soft bounds.
+const phChart       = makeChart('ph-chart',          'pH',          '#00bcd4', [4,  10]);
+const chlorineChart = makeChart('chlorine-chart',    'Chlorine',    '#f39c12', [0,  3]);
+const tempChart     = makeChart('temperature-chart', 'Temperature', '#e74c3c', [0, 40]);
 
 function updateChart(chart, labels, values) {
     chart.data.labels                = labels.slice(-MAX_POINTS);
@@ -221,10 +225,8 @@ async function pollLatestAnomaly() {
     const score     = data.ensemble_score ?? 0;
     const svmScore  = data.svm_score ?? 0;
     const lstmScore = data.lstm_score ?? 0;
-    const isAnomaly = data.is_anomaly ?? false;
     const severity  = data.severity ?? 'NORMAL';
     const sensor    = data.sensor_type ?? '--';
-    const ts        = data.timestamp;
 
     drawGauge('score-gauge', score);
 
@@ -249,12 +251,19 @@ async function pollLatestAnomaly() {
         scoreNum.style.color = '#27ae60';
     }
 
-    // Alert banner — only trigger for new anomaly events
+    // Alert banner — driven by the LAST ANOMALY EVENT (which persists),
+    // not the latest reading (which is usually a normal reading and
+    // overwrites anomalies between polls).
+    const lastAnom  = data.last_anomaly;
     const banner    = document.getElementById('alert-banner');
     const alertText = document.getElementById('alert-text');
-    if (isAnomaly && ts && ts !== lastAnomalyTimestamp) {
-        lastAnomalyTimestamp = ts;
-        alertText.textContent = `⚠ ANOMALY DETECTED — ${data.anomaly_type?.toUpperCase() ?? ''} on ${sensor} (score: ${score.toFixed(3)}, severity: ${severity})`;
+    if (lastAnom && lastAnom.timestamp && lastAnom.timestamp !== lastAnomalyTimestamp) {
+        lastAnomalyTimestamp = lastAnom.timestamp;
+        const aType    = (lastAnom.anomaly_type || 'anomaly').toUpperCase();
+        const aSensor  = lastAnom.sensor_type || '--';
+        const aScore   = (lastAnom.ensemble_score ?? 0).toFixed(3);
+        const aSev     = lastAnom.severity || 'HIGH';
+        alertText.textContent = `⚠ ANOMALY DETECTED — ${aType} on ${aSensor} (score: ${aScore}, severity: ${aSev})`;
         banner.classList.remove('alert-hidden');
     }
 }

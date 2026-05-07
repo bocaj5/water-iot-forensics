@@ -86,13 +86,20 @@ def register_routes(app: Flask):
 
     @app.route('/api/latest-anomaly')
     def api_latest_anomaly():
-        """Returns the most recent anomaly result for live score gauge."""
+        """Returns the most recent reading (for the gauge) plus the most
+        recent ANOMALY event (for the alert banner). The two are tracked
+        separately because the gauge updates on every reading while the
+        banner must persist across normal readings until a new anomaly
+        arrives."""
         if _guardian_node is None or _guardian_node.anomaly_engine is None:
             return jsonify({})
-        stats = _guardian_node.anomaly_engine.get_stats()
-        latest = getattr(_guardian_node.anomaly_engine, 'latest_result', None)
+
+        engine = _guardian_node.anomaly_engine
+        latest = getattr(engine, 'latest_result', None)
+        latest_anomaly = getattr(engine, 'latest_anomaly_result', None)
+
         if latest is None:
-            return jsonify({
+            payload = {
                 'svm_score': 0.0,
                 'lstm_score': 0.0,
                 'ensemble_score': 0.0,
@@ -101,8 +108,12 @@ def register_routes(app: Flask):
                 'severity': 'NORMAL',
                 'sensor_type': '--',
                 'timestamp': None,
-            })
-        return jsonify(latest.to_dict())
+            }
+        else:
+            payload = latest.to_dict()
+
+        payload['last_anomaly'] = latest_anomaly.to_dict() if latest_anomaly else None
+        return jsonify(payload)
 
 
 def run_dashboard(guardian_node, host: str = '0.0.0.0', port: int = 5000):

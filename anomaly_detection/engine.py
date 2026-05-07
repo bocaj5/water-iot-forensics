@@ -38,7 +38,7 @@ class AnomalyDetectionEngine:
                  svm_model_file: Optional[str] = None,
                  lstm_model_file: Optional[str] = None,
                  feature_window: int = 50,
-                 anomaly_threshold: float = 0.65,
+                 anomaly_threshold: float = 0.80,
                  svm_weight: float = 0.6,
                  lstm_weight: float = 0.4,
                  alert_cooldown_sec: int = 60):
@@ -62,6 +62,7 @@ class AnomalyDetectionEngine:
         }
 
         self.latest_result: Optional[AnomalyResult] = None
+        self.latest_anomaly_result: Optional[AnomalyResult] = None
 
         logger.info(
             f"AnomalyDetectionEngine initialized "
@@ -107,6 +108,14 @@ class AnomalyDetectionEngine:
         ensemble_score = (self.svm_weight * svm_score) + (self.lstm_weight * lstm_score)
         is_anomaly = ensemble_score > self.anomaly_threshold
 
+        # Rule-based safety net: SVM was trained on synthetic data and
+        # under-fires on real-hardware events (e.g. a 25→50°C spike). If
+        # a feature crosses a clear physical threshold, force an anomaly
+        # and boost the ensemble score so severity reflects it.
+        if not is_anomaly and self._rule_based_anomaly(sensor_type, features):
+            is_anomaly = True
+            ensemble_score = max(ensemble_score, 0.75)
+
         # Classify
         anomaly_type = 'normal'
         severity = 'NORMAL'
@@ -129,6 +138,7 @@ class AnomalyDetectionEngine:
         if is_anomaly:
             self.stats['anomalies_detected'] += 1
             self.stats['last_anomaly_time'] = result.timestamp
+            self.latest_anomaly_result = result
             now = datetime.now()
             last = self._last_alert_time.get(sensor_type)
             if last is None or (now - last) >= self.alert_cooldown:
@@ -148,30 +158,92 @@ class AnomalyDetectionEngine:
 
         return result
 
+    @staticmethod
+    def _rule_based_anomaly(sensor_type: str,
+                            features: Dict[str, float]) -> bool:
+        """Hard physical thresholds that always trigger an anomaly.
+
+        Acts as a safety net for the ML ensemble, which is trained on
+        synthetic data and can miss real-world events. Tuned to fire on
+        clearly out-of-spec readings without flagging normal noise.
+        """
+        current = features.get('current_value', 0)
+        rate = abs(features.get('rate_of_change', 0))
+        z = abs(features.get('z_score_current', 0))
+
+        if sensor_type == 'pH':
+            # Drinking water: 6.5–8.5. Anything outside or shifting fast is suspect.
+            # Lower bound aligned with the acid_injection classifier so a real
+            # lemon squeeze (drops pH 1–2 to ~5) fires; probe noise around 6 doesn't.
+            if current < 5.5 or current > 8.5:
+                return True
+            if rate > 0.6 or z > 3.0:  # lemon juice / sudden chemistry change
+                return True
+
+        elif sensor_type == 'Temperature':
+            # Hot/cold contamination — well below scald (50°C) but well above
+            # the ambient room baseline we calibrated on (~22–25°C). Hot kettle
+            # pour adds ~20°C → 42°C; ambient warming should not fire.
+            if current > 35.0 or current < 5.0:
+                return True
+            if rate > 3.5 or z > 3.5:
+                return True
+
+        elif sensor_type == 'Chlorine':
+            # WHO recommends 0.2–1.0 mg/L residual; ≥3.0 is overdose.
+            if current > 3.0 or current < 0.15:
+                return True
+            if rate > 0.5 or z > 3.0:
+                return True
+
+        return False
+
     def _classify_anomaly(self, sensor_type: str,
                           features: Dict[str, float]) -> str:
         """Classify the type of anomaly from features and sensor type."""
-        z_score = abs(features.get('z_score_current', 0))
-        rate = abs(features.get('rate_of_change', 0))
+        z_score_signed = features.get('z_score_current', 0)
+        z_score = abs(z_score_signed)
+        rate_signed = features.get('rate_of_change', 0)
+        rate = abs(rate_signed)
         current = features.get('current_value', 0)
+        mean = features.get('mean', current)
 
         if sensor_type == 'pH':
             if current < 5.5:
                 return 'acid_injection'
-            elif current > 9.0:
+            if current > 9.0:
                 return 'base_injection'
-        elif sensor_type == 'Chlorine':
+            if rate > 1.0 or z_score > 3.5:
+                return 'ph_drift'
+            return 'ph_anomaly'
+
+        if sensor_type == 'Chlorine':
             if current > 3.0:
                 return 'chlorine_overdose'
-        elif sensor_type == 'Temperature':
-            if current > 36.0:
-                return 'temperature_spike'
+            if current < 0.2:
+                return 'chlorine_underdose'
+            if rate > 0.5 or z_score > 3:
+                return 'chlorine_drift'
+            return 'chlorine_anomaly'
 
+        if sensor_type == 'Temperature':
+            # Hot-water introduction: absolute high OR rapid upward swing
+            # away from the recent baseline. Catches both kettle-hot water
+            # (>36°C) and warmer-than-ambient water (sustained rise).
+            if current > 30.0 or rate_signed > 3.0 or (current > mean + 5 and z_score > 2):
+                return 'temperature_spike'
+            if current < 5.0 or rate_signed < -3.0:
+                return 'temperature_drop'
+            if rate > 2.5 or z_score > 3.5:
+                return 'temperature_drift'
+            return 'temperature_anomaly'
+
+        # Unknown sensor type — keep a generic but informative label
         if z_score > 4 or rate > 3:
-            return 'chemical_overdose'
-        elif rate > 0.5:
-            return 'sensor_drift'
-        return 'unknown'
+            return f'{sensor_type.lower()}_spike'
+        if rate > 0.5:
+            return f'{sensor_type.lower()}_drift'
+        return f'{sensor_type.lower()}_anomaly'
 
     @staticmethod
     def _classify_severity(score: float) -> str:
